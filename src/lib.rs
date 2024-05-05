@@ -20,7 +20,7 @@ pub trait Job: Send + Sync {
     /// # Errors
     ///
     /// In addition to any errors caused by the job itself, the job may return an error to indicate that the job should be requeued.
-    async fn run(&mut self) -> Result<()>;
+    async fn run(&mut self, queue: Arc<AppQueue>) -> Result<()>;
 
     /// Check if an error is fatal.
     ///
@@ -107,7 +107,7 @@ impl AppQueue {
     /// # Return value
     ///
     /// Returns `false` if there are currently no jobs to run.
-    async fn run_job(&self) -> Result<bool> {
+    async fn run_job(self: &Arc<Self>) -> Result<bool> {
         let job_info = query!(
             r#"
 UPDATE jobs
@@ -134,7 +134,7 @@ UPDATE jobs
         let mut de: Box<dyn Job> = ciborium::de::from_reader(job_info.job_data.as_slice())
             .context("Deserializing the job data")?;
 
-        match de.run().await {
+        match de.run(Arc::clone(self)).await {
             Ok(()) => {
                 debug!("Job {} completed successfully", job_info.id);
                 query!("DELETE FROM jobs WHERE id =?", job_info.id)
