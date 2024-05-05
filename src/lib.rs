@@ -1,3 +1,44 @@
+//! In-app persistent queue
+//!
+//! This crate implements a job queue for monolithic applications that persists across application restarts.
+//!
+//! Thanks to the [`typetag`](https://crates.io/crates/typetag) crate, your [`Job`](trait.Job.html)s can use any serializable data type.
+//!
+//! ```
+//! # use serde::{Deserialize, Serialize};
+//! # use anyhow::Result;
+//! # use std::sync::Arc;
+//! # use app_queue::{AppQueue, Job};
+//! # static NOTIFIER: tokio::sync::Notify = tokio::sync::Notify::const_new();
+//! #[derive(Clone, Debug, Serialize, Deserialize)]
+//! pub struct MyJob {
+//!     message: String
+//! }
+//!
+//! #[typetag::serde]
+//! #[async_trait::async_trait]
+//! impl Job for MyJob {
+//!   async fn run(&mut self, _: Arc<AppQueue>) -> Result<()> {
+//!     println!("{}", self.message);
+//! #    NOTIFIER.notify_one();
+//!     Ok(())
+//!   }
+//! }
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<()> {
+//! # tracing_subscriber::fmt::init();
+//!   let queue = AppQueue::new("/tmp/queue.db").await?;
+//!   let job = MyJob {
+//!     message: "Hello, world!".into()
+//!   };
+//!   queue.add_job(Box::new(job)).await?;
+//!   queue.run_job_workers_default();
+//! # NOTIFIER.notified().await;
+//!   Ok(())
+//! }
+//! ```
+
 use std::{convert::Infallible, path::Path, sync::Arc};
 
 use anyhow::{Context, Result};
@@ -49,6 +90,9 @@ pub struct AppQueue {
     notifier: Notify,
 }
 
+/// Central queue interface
+///
+/// See the crate documentation to see how to use this crate.
 impl AppQueue {
     /// Opens or creates a new queue.
     ///
@@ -71,18 +115,6 @@ impl AppQueue {
             .context("initializing sqlite datababse")?;
 
         Ok(Arc::new(db))
-    }
-
-    /// Creates a new queue using an in-memory database.
-    ///
-    /// This will not persist any data between restarts
-    ///
-    /// # Panics
-    /// The function may panic if sqlite cannot create a database in-memory. This could happen if the system does not have sufficient memory.
-    pub async fn new_in_memory() -> Arc<Self> {
-        Self::new(":memory:")
-            .await
-            .expect("Failed to create in-memory queue (insufficient memory?)")
     }
 
     /// Initializes the database if it is uninitialized.

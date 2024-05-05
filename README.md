@@ -1,77 +1,51 @@
-# Project Title
+# App-Queue
 
-Simple overview of use/purpose.
+App-queue is a simple persistent in-app queue for Rust. It is designed to be dropped into monolithic applications, and provide automatic queueing and retrying for asynchronous tasks.
 
-## Description
+Additionally, it allows the use of any serializable data type for requests.
 
-An in-depth paragraph about your project and overview of use.
+By default, if a job returns an error, it will be retried indefinitely with exponential backoff (600s max delay). This can however be overridden on a per-job-type basis.
 
-## Getting Started
+Sample usage, from the documentation:
 
-### Dependencies
+```rust
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MyJob {
+    message: String
+}
 
-* Describe any prerequisites, libraries, OS version, etc., needed before installing program.
-* ex. Windows 10
+#[typetag::serde]
+#[async_trait::async_trait]
+impl Job for MyJob {
+  async fn run(&mut self, _: Arc<AppQueue>) -> Result<()> {
+    println!("{}", self.message);
+    Ok(())
+  }
+}
 
-### Installing
-
-* How/where to download your program
-* Any modifications needed to be made to files/folders
-
-### Executing program
-
-* How to run the program
-* Step-by-step bullets
+#[tokio::main]
+async fn main() -> Result<()> {
+# tracing_subscriber::fmt::init();
+  let queue = AppQueue::new("/tmp/queue.db").await?;
+  let job = MyJob {
+    message: "Hello, world!".into()
+  };
+  queue.add_job(Box::new(job)).await?;
+  queue.run_job_workers_default();
+  Ok(())
+}
 ```
-code blocks for commands
-```
 
-## Help
+A larger example [can be found here](https://github.com/DarkKirb/attic/blob/main/queue/src/main.rs).
 
-Any advise for common problems or issues.
-```
-command to run if program contains helper info
-```
+## Caveats
 
-## Authors
+Incompatible schema changes (Renaming/Removal of Job structs), as well as incompatible changes in the structure of the job itself will cause jobs to get stuck in the queue. This will cause errors to show up on startup, however they will be ignored for the rest of the program’s runtime.
 
-Contributors names and contact info
+## Limitations
 
-ex. Dominique Pizzie
-ex. [@DomPizzie](https://twitter.com/dompizzie)
+Potentially desirable features that are currently not supported:
 
-## Version History
-
-* 0.2
-    * Various bug fixes and optimizations
-    * See [commit change]() or See [release history]()
-* 0.1
-    * Initial Release
-
-## License
-
-This project is licensed under the [NAME HERE] License - see the LICENSE.md file for details
-
-## Acknowledgments
-
-Inspiration, code snippets, etc.
-* [awesome-readme](https://github.com/matiassingers/awesome-readme)
-* [PurpleBooth](https://gist.github.com/PurpleBooth/109311bb0361f32d87a2)
-* [dbader](https://github.com/dbader/readme-template)
-* [zenorocha](https://gist.github.com/zenorocha/4526327)
-* [fvcproductions](https://gist.github.com/fvcproductions/1bfc2d4aecb01a834b46)
-
-## Contributors
-
-<!-- readme: contributors -start -->
-<table>
-<tr>
-    <td align="center">
-        <a href="https://github.com/DarkKirb">
-            <img src="https://avatars.githubusercontent.com/u/23011243?v=4" width="100;" alt="DarkKirb"/>
-            <br />
-            <sub><b>Charlotte</b></sub>
-        </a>
-    </td></tr>
-</table>
-<!-- readme: contributors -end -->
+- Scheduling jobs to run after a certain time (technically capable, but no API exists yet)
+- Prioritization
+- Integration with the app’s storage. The app likely already uses a database, and it would be useful to only have one database total. Proper DBMSes may also improve performance in some cases.

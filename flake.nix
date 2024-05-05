@@ -50,6 +50,7 @@
             cargo2nix.packages.${system}.cargo2nix
             sqlx-cli
             alejandra
+            cargo-release
           ];
         };
       packages = {
