@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO jobs (unique_job_id, run_after, job_data) VALUES (?,datetime('now'),?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "13e8ab253afe682cd7187c458458db49f82376cb1c6e06b52652a3518754e2a9"
+}

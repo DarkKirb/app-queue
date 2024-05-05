@@ -208,7 +208,7 @@ UPDATE jobs
         let mut job_data = Vec::new();
         ciborium::into_writer(&job, &mut job_data)?;
         query!(
-            "INSERT INTO jobs (id, run_after, job_data) VALUES (?,datetime('now'),?)",
+            "INSERT INTO jobs (unique_job_id, run_after, job_data) VALUES (?,datetime('now'),?)",
             id,
             job_data
         )
