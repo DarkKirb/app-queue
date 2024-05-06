@@ -245,6 +245,7 @@ UPDATE jobs
         )
         .execute(&self.db_conn)
         .await?;
+        self.notifier.notify_one();
         Ok(())
     }
 
