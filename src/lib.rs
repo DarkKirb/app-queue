@@ -140,6 +140,7 @@ impl AppQueue {
     ///
     /// Returns `false` if there are currently no jobs to run.
     async fn run_job(self: &Arc<Self>) -> Result<bool> {
+        let now = Utc::now();
         let job_info = query!(
             r#"
 UPDATE jobs
@@ -147,11 +148,12 @@ UPDATE jobs
     WHERE id IN (
         SELECT id FROM jobs
         WHERE is_running = 0
-        AND run_after <= datetime('now')
+        AND run_after <= ?
         ORDER BY priority DESC, run_after ASC
         LIMIT 1)
     RETURNING id, job_data, retries
-        "#
+        "#,
+            now
         )
         .fetch_optional(&self.db_conn)
         .await
@@ -257,9 +259,11 @@ UPDATE jobs
         let id = id.as_ref();
         let mut job_data = Vec::new();
         ciborium::into_writer(&job, &mut job_data)?;
+        let now = Utc::now();
         query!(
-            "INSERT INTO jobs (unique_job_id, run_after, job_data) VALUES (?,datetime('now'),?)",
+            "INSERT INTO jobs (unique_job_id, run_after, job_data) VALUES (?,?,?)",
             id,
+            now,
             job_data
         )
         .execute(&self.db_conn)
