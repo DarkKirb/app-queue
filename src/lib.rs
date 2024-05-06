@@ -148,7 +148,7 @@ UPDATE jobs
         SELECT id FROM jobs
         WHERE is_running = 0
         AND run_after <= datetime('now')
-        ORDER BY run_after ASC
+        ORDER BY priority DESC, run_after ASC
         LIMIT 1)
     RETURNING id, job_data, retries
         "#
@@ -237,10 +237,11 @@ UPDATE jobs
         let mut job_data = Vec::new();
         ciborium::into_writer(&job_boxed, &mut job_data)?;
         query!(
-            "INSERT INTO jobs (unique_job_id, run_after, job_data) VALUES (?, ?, ?)",
+            "INSERT INTO jobs (unique_job_id, run_after, job_data, priority) VALUES (?, ?, ?, ?)",
             job.id,
             job.run_after,
-            job_data
+            job_data,
+            job.priority
         )
         .execute(&self.db_conn)
         .await?;
@@ -283,6 +284,7 @@ pub struct JobBuilder<J: Job> {
     job: J,
     id: String,
     run_after: DateTime<Utc>,
+    priority: i64,
 }
 
 impl<J: Job> JobBuilder<J> {
@@ -292,6 +294,7 @@ impl<J: Job> JobBuilder<J> {
             job,
             id: Uuid::new_v4().to_string(),
             run_after: Utc::now(),
+            priority: 0,
         }
     }
 
@@ -314,5 +317,15 @@ impl<J: Job> JobBuilder<J> {
     /// Schedules the job to the queue.
     pub async fn schedule(self, app_queue: &AppQueue) -> Result<()> {
         app_queue.schedule_job(self).await
+    }
+
+    /// Changes the priority of the job.
+    ///
+    /// Jobs that are (over)due will run in order of priority, and then in order of how long the job has been due.
+    ///
+    /// A higher number indicates a higher priority. The default priority is 0.
+    pub fn priority(mut self, prio: i64) -> Self {
+        self.priority = prio;
+        self
     }
 }

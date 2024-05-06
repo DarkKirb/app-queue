@@ -51,6 +51,7 @@
             sqlx-cli
             alejandra
             cargo-release
+            sqlite
           ];
         };
       packages = {

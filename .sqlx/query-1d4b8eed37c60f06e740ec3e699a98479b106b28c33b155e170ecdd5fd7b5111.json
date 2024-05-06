@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO jobs (unique_job_id, run_after, job_data, priority) VALUES (?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "1d4b8eed37c60f06e740ec3e699a98479b106b28c33b155e170ecdd5fd7b5111"
+}

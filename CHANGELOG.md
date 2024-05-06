@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Builder API for Jobs
 - Scheduling jobs to execute after some point in the future
+- Prioritization of jobs.
+
+### Administrator Note
+
+This release contains a database schema change. It may take longer than usual to start the queue up.
 
 ## [0.1.0] - 2024-05-05
 

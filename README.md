@@ -46,5 +46,4 @@ Incompatible schema changes (Renaming/Removal of Job structs), as well as incomp
 
 Potentially desirable features that are currently not supported:
 
-- Prioritization
 - Integration with the app’s storage. The app likely already uses a database, and it would be useful to only have one database total. Proper DBMSes may also improve performance in some cases.
