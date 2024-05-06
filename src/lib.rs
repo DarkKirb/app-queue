@@ -85,14 +85,14 @@ pub trait Job: Send + Sync {
     }
 }
 
+/// Central queue interface
+///
+/// See the crate documentation to see how to use this crate.
 pub struct AppQueue {
     db_conn: SqlitePool,
     notifier: Notify,
 }
 
-/// Central queue interface
-///
-/// See the crate documentation to see how to use this crate.
 impl AppQueue {
     /// Opens or creates a new queue.
     ///
@@ -232,10 +232,26 @@ UPDATE jobs
         self.run_job_workers(num_cpus::get());
     }
 
+    async fn schedule_job<J: Job>(&self, job: JobBuilder<J>) -> Result<()> {
+        let job_boxed: Box<dyn Job> = Box::new(job.job);
+        let mut job_data = Vec::new();
+        ciborium::into_writer(&job_boxed, &mut job_data)?;
+        query!(
+            "INSERT INTO jobs (unique_job_id, run_after, job_data) VALUES (?, ?, ?)",
+            job.id,
+            job.run_after,
+            job_data
+        )
+        .execute(&self.db_conn)
+        .await?;
+        Ok(())
+    }
+
     /// Adds a job with a specific opaque ID to the queue.
     ///
     /// This will not do anything if the job is already in the queue.
     pub async fn add_unique_job(&self, id: impl AsRef<str>, job: Box<dyn Job>) -> Result<()> {
+        // TODO: deduplicate with the above
         let id = id.as_ref();
         let mut job_data = Vec::new();
         ciborium::into_writer(&job, &mut job_data)?;
@@ -258,5 +274,45 @@ UPDATE jobs
     pub async fn add_job(&self, job: Box<dyn Job>) -> Result<()> {
         let id = Uuid::new_v4();
         self.add_unique_job(id.to_string(), job).await
+    }
+}
+
+/// A builder-style interface for scheduling jobs.
+#[derive(Clone, Debug)]
+pub struct JobBuilder<J: Job> {
+    job: J,
+    id: String,
+    run_after: DateTime<Utc>,
+}
+
+impl<J: Job> JobBuilder<J> {
+    /// Creates a new job builder.
+    pub fn new(job: J) -> Self {
+        Self {
+            job,
+            id: Uuid::new_v4().to_string(),
+            run_after: Utc::now(),
+        }
+    }
+
+    /// Sets the ID of the job.
+    ///
+    /// Set this to a deterministic value to ensure that a job is only scheduled once.
+    pub fn id(mut self, id: impl ToString) -> Self {
+        self.id = id.to_string();
+        self
+    }
+
+    /// Sets the time after which the job is allowed to run.
+    ///
+    /// This doesn’t guarantee execution at that time.
+    pub fn run_after(mut self, run_after: DateTime<Utc>) -> Self {
+        self.run_after = run_after;
+        self
+    }
+
+    /// Schedules the job to the queue.
+    pub async fn schedule(self, app_queue: &AppQueue) -> Result<()> {
+        app_queue.schedule_job(self).await
     }
 }
