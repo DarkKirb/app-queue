@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\nUPDATE jobs\n    SET is_running = 1\n    WHERE id IN (\n        SELECT id FROM jobs\n        WHERE is_running = 0\n        AND run_after <= datetime('now')\n        ORDER BY priority DESC, run_after ASC\n        LIMIT 1)\n    RETURNING id, job_data, retries\n        ",
+  "query": "\nUPDATE jobs\n    SET is_running = 1\n    WHERE id IN (\n        SELECT id FROM jobs\n        WHERE is_running = 0\n        AND run_after <= ?\n        ORDER BY priority DESC, run_after ASC\n        LIMIT 1)\n    RETURNING id, job_data, retries\n        ",
   "describe": {
     "columns": [
       {
@@ -20,7 +20,7 @@
       }
     ],
     "parameters": {
-      "Right": 0
+      "Right": 1
     },
     "nullable": [
       false,
@@ -28,5 +28,5 @@
       false
     ]
   },
-  "hash": "5761679dacfb94a5c371b325dc78b84ffb10a039fe8a54e1430add0506c99dc6"
+  "hash": "a5dc301231fd7b35b2d3a3509adcf00097f22ee66ddc1ba72cf7f3c72f701e56"
 }
