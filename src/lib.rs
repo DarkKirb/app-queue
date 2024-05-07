@@ -39,17 +39,25 @@
 //! }
 //! ```
 
-use std::{convert::Infallible, path::Path, sync::Arc};
+use std::{
+    convert::Infallible,
+    path::Path,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use sqlx::{query, sqlite::SqliteConnectOptions, SqlitePool};
-use tokio::sync::Notify;
+use tokio::{sync::Notify, time::timeout};
 use tracing::{debug, error, info};
 use uuid::Uuid;
 
 /// The Never `!` type. Can’t be created. Indicates that the function will never return.
+#[deprecated(since = "0.1.1", note = "Will become private API in 0.2.0")]
 pub type Never = Infallible;
 
 /// Queued Job interface
@@ -90,7 +98,9 @@ pub trait Job: Send + Sync {
 /// See the crate documentation to see how to use this crate.
 pub struct AppQueue {
     db_conn: SqlitePool,
-    notifier: Notify,
+    runner_notifier: Notify,
+    monitor_notifier: Notify,
+    monitor_spawned: AtomicBool,
 }
 
 impl AppQueue {
@@ -106,9 +116,13 @@ impl AppQueue {
         )
         .await
         .context("Opening sqlite database")?;
-        let notifier = Notify::new();
 
-        let db = Self { db_conn, notifier };
+        let db = Self {
+            db_conn,
+            runner_notifier: Notify::new(),
+            monitor_notifier: Notify::new(),
+            monitor_spawned: AtomicBool::new(false),
+        };
 
         db.initialize_db()
             .await
@@ -129,6 +143,14 @@ impl AppQueue {
             .await
             .context("Requeuing aborted jobs")?;
         Ok(())
+    }
+
+    /// Wakes up all executor tasks.
+    ///
+    /// This is useful for when you
+    fn wake_up_executor_tasks(&self) {
+        self.runner_notifier.notify_waiters();
+        self.runner_notifier.notify_one();
     }
 
     /// Runs a single job
@@ -174,6 +196,7 @@ UPDATE jobs
                 query!("DELETE FROM jobs WHERE id =?", job_info.id)
                     .execute(&self.db_conn)
                     .await?;
+                self.monitor_notifier.notify_one();
             }
             Err(e) => {
                 error!("Job {} failed: {:#?}", job_info.id, e);
@@ -185,6 +208,7 @@ UPDATE jobs
                     query!("DELETE FROM jobs WHERE id =?", job_info.id)
                         .execute(&self.db_conn)
                         .await?;
+                    self.monitor_notifier.notify_one();
                     return Ok(true);
                 }
                 let next_retry = de.get_next_retry(job_info.retries);
@@ -201,28 +225,68 @@ UPDATE jobs
                 )
                 .execute(&self.db_conn)
                 .await?;
+                self.monitor_notifier.notify_one();
             }
         }
 
         Ok(true)
     }
 
+    #[allow(deprecated)]
+    async fn monitor_job(self: Arc<Self>) -> Result<Never> {
+        loop {
+            let now = Utc::now();
+
+            let query_res = query!(
+                "SELECT id FROM jobs
+        WHERE is_running = 0
+        AND run_after <= ? LIMIT 1",
+                now
+            )
+            .fetch_optional(&self.db_conn)
+            .await?;
+            if query_res.is_some() {
+                self.wake_up_executor_tasks();
+            }
+
+            // Sleep until the executor is notified or
+            timeout(
+                std::time::Duration::from_secs(10),
+                self.monitor_notifier.notified(),
+            )
+            .await
+            .ok();
+        }
+    }
+
     /// Uses the current task to serve as a job runner.
     ///
     /// This future will never resolve, unless an error occurs.
+    #[deprecated(
+        since = "0.1.1",
+        note = "Use `run_job_workers` or `run_job_workers_default` instead."
+    )]
+    #[allow(deprecated)]
     pub async fn run_job_loop(self: Arc<Self>) -> Result<Never> {
-        self.notifier.notify_one();
+        // TODO for version 0.2.0: this shouldn’t be in here!
+        if !self.monitor_spawned.swap(true, Ordering::Relaxed) {
+            let self2 = Arc::clone(&self);
+            tokio::spawn(self2.monitor_job());
+        }
+
+        self.runner_notifier.notify_one();
         info!("Starting job worker.");
 
         loop {
-            self.notifier.notified().await;
-            debug!("Received queue notification.");
             while self.run_job().await? {}
-            debug!("No more jobs to run for now. Sleeping.")
+            debug!("No more jobs to run for now. Sleeping.");
+            self.runner_notifier.notified().await;
+            debug!("Received queue notification.");
         }
     }
 
     /// Spawns a number of worker tasks for running jobs.
+    #[allow(deprecated)]
     pub fn run_job_workers(self: Arc<Self>, num_workers: usize) {
         for _ in 0..num_workers {
             tokio::spawn(Arc::clone(&self).run_job_loop());
@@ -247,7 +311,7 @@ UPDATE jobs
         )
         .execute(&self.db_conn)
         .await?;
-        self.notifier.notify_one();
+        self.monitor_notifier.notify_one();
         Ok(())
     }
 
@@ -269,7 +333,7 @@ UPDATE jobs
         .execute(&self.db_conn)
         .await?;
 
-        self.notifier.notify_one();
+        self.monitor_notifier.notify_one();
 
         Ok(())
     }
