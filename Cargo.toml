@@ -29,7 +29,7 @@ typetag = "0.2.16"
 uuid = { version = "1.8.0", features = ["v4"] }
 
 [dev-dependencies]
-serde = { version = "1.0.201", features = ["derive"] }
+serde = { version = "1.0.204", features = ["derive"] }
 tokio = { version = "1.37.0", features = [
     "macros",
     "rt-multi-thread",
