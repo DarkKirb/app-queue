@@ -10,7 +10,7 @@ use super::{AcquiredJob, Database};
 #[async_trait]
 impl Database for PgPool {
     async fn run_migrations(&self) -> Result<()> {
-        sqlx::migrate!("migrations/sqlite")
+        sqlx::migrate!("migrations/postgres")
             .run(self)
             .await
             .context("Applying migrations")?;
