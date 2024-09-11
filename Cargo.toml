@@ -1,6 +1,6 @@
 [package]
 name = "app-queue"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["Charlotte 🦝 Delenk <lotte@chir.rs>"]
 license = "Apache-2.0"
@@ -12,24 +12,29 @@ repository = "https://github.com/DarkKirb/app-queue"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1.0.82"
-async-trait = "0.1.80"
+anyhow = "1.0.87"
+async-trait = "0.1.82"
 chrono = "0.4.38"
 ciborium = "0.2.2"
 num_cpus = "1.16.0"
-sqlx = { version = "0.7.4", features = [
-    "sqlite",
+sqlx = { version = "0.8.2", features = [
+    "any",
     "chrono",
     "runtime-tokio",
     "migrate",
 ] }
-tokio = { version = "1.37.0", features = ["sync", "time"] }
+tokio = { version = "1.40.0", features = ["sync", "time"] }
 tracing = "0.1.40"
-typetag = "0.2.16"
-uuid = { version = "1.8.0", features = ["v4"] }
+typetag = "0.2.18"
+uuid = { version = "1.10.0", features = ["v4"] }
+
+[features]
+sqlite = ["sqlx/sqlite"]
+postgres = ["sqlx/postgres"]
+default = ["sqlite"]
 
 [dev-dependencies]
-serde = { version = "1.0.201", features = ["derive"] }
+serde = { version = "1.0.210", features = ["derive"] }
 tokio = { version = "1.37.0", features = [
     "macros",
     "rt-multi-thread",

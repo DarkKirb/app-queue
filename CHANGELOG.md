@@ -12,15 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Builder API for Jobs
 - Scheduling jobs to execute after some point in the future
 - Prioritization of jobs.
+- Postgresql support
 
 ### Fixes
 
 - Tasks scheduled in the future will eventually be executed.
 
-### Deprecation
+### Breaking Changes
 
-- `run_job_loop` is deprecated, as there are now 2 different task types used.
-- `Never` is only going to be used for private APIs.
+- `run_job_loop` and the `Never` type got removed.
+- sqlite paths now require to be prepended with `sqlite://`
 
 ### Administrator Note
 

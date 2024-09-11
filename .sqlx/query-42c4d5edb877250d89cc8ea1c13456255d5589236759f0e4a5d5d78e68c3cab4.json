@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE jobs SET is_running = 'f', retries = retries + 1 WHERE is_running = 't'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "42c4d5edb877250d89cc8ea1c13456255d5589236759f0e4a5d5d78e68c3cab4"
+}

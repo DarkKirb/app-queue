@@ -8,7 +8,7 @@
 //! # use serde::{Deserialize, Serialize};
 //! # use anyhow::Result;
 //! # use std::sync::Arc;
-//! # use app_queue::{AppQueue, Job};
+//! # use app_queue::{AppQueue, Job, JobBuilder};
 //! # static NOTIFIER: tokio::sync::Notify = tokio::sync::Notify::const_new();
 //! #[derive(Clone, Debug, Serialize, Deserialize)]
 //! pub struct MyJob {
@@ -28,11 +28,11 @@
 //! #[tokio::main]
 //! async fn main() -> Result<()> {
 //! # tracing_subscriber::fmt::init();
-//!   let queue = AppQueue::new("/tmp/queue.db").await?;
+//!   let queue = AppQueue::new_sqlite::<>("sqlite:///tmp/queue.db?mode=rwc").await?;
 //!   let job = MyJob {
 //!     message: "Hello, world!".into()
 //!   };
-//!   queue.add_job(Box::new(job)).await?;
+//!   JobBuilder::new(job).schedule(&queue).await?;
 //!   queue.run_job_workers_default();
 //! # NOTIFIER.notified().await;
 //!   Ok(())
@@ -41,24 +41,25 @@
 
 use std::{
     convert::Infallible,
-    path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
 };
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
-use sqlx::{query, sqlite::SqliteConnectOptions, SqlitePool};
+use db::Database;
+use sqlx::Pool;
 use tokio::{sync::Notify, time::timeout};
 use tracing::{debug, error, info};
 use uuid::Uuid;
 
+mod db;
+
 /// The Never `!` type. Can’t be created. Indicates that the function will never return.
-#[deprecated(since = "0.1.1", note = "Will become private API in 0.2.0")]
-pub type Never = Infallible;
+type Never = Infallible;
 
 /// Queued Job interface
 #[typetag::serde(tag = "type")]
@@ -97,7 +98,7 @@ pub trait Job: Send + Sync {
 ///
 /// See the crate documentation to see how to use this crate.
 pub struct AppQueue {
-    db_conn: SqlitePool,
+    db_conn: Box<dyn Database + Send + Sync>,
     runner_notifier: Notify,
     monitor_notifier: Notify,
     monitor_spawned: AtomicBool,
@@ -108,40 +109,68 @@ impl AppQueue {
     ///
     /// # Errors
     /// This function returns an error if the database cannot be opened, such as when the database is inaccessible or corrupt.
-    pub async fn new(db_path: impl AsRef<Path>) -> Result<Arc<Self>> {
-        let db_conn = SqlitePool::connect_with(
-            SqliteConnectOptions::new()
-                .filename(db_path)
-                .create_if_missing(true),
-        )
-        .await
-        .context("Opening sqlite database")?;
+    pub async fn new<DB>(db_url: impl AsRef<str>) -> Result<Arc<Self>>
+    where
+        DB: sqlx::Database,
+        Pool<DB>: Database,
+    {
+        let db_conn = Pool::<DB>::connect(db_url.as_ref())
+            .await
+            .context("Connecting to database")?;
 
         let db = Self {
-            db_conn,
+            db_conn: Box::new(db_conn),
             runner_notifier: Notify::new(),
             monitor_notifier: Notify::new(),
             monitor_spawned: AtomicBool::new(false),
         };
 
-        db.initialize_db()
-            .await
-            .context("initializing sqlite datababse")?;
+        db.initialize_db().await.context("initializing datababse")?;
 
         Ok(Arc::new(db))
     }
 
+    /// Utility function for opening a sqlite database
+    ///
+    /// # Errors
+    /// This function returns an error if the database cannot be opened, such as when the database is inaccessible or corrupt.
+    #[cfg(feature = "sqlite")]
+    pub async fn new_sqlite(db_url: impl AsRef<str>) -> Result<Arc<Self>> {
+        use sqlx::Sqlite;
+
+        Self::new::<Sqlite>(db_url).await
+    }
+
+    /// Utility function for opening a sqlite database
+    ///
+    /// # Errors
+    /// This function returns an error if the database cannot be opened, such as when the database is inaccessible or corrupt.
+    #[cfg(feature = "postgres")]
+    pub async fn new_postgres(db_url: impl AsRef<str>) -> Result<Arc<Self>> {
+        use sqlx::Postgres;
+
+        Self::new::<Postgres>(db_url).await
+    }
+
+    /// Opens a database from a string
+    pub async fn new_dynamic(db_url: impl AsRef<str>) -> Result<Arc<Self>> {
+        let db_url = db_url.as_ref();
+        #[cfg(feature = "sqlite")]
+        if db_url.starts_with("sqlite://") {
+            return Self::new_sqlite(db_url).await;
+        }
+        #[cfg(feature = "postgres")]
+        if db_url.starts_with("postgresql://") {
+            return Self::new_sqlite(db_url).await;
+        }
+        bail!("Invalid database URL: {db_url}");
+    }
+
     /// Initializes the database if it is uninitialized.
     async fn initialize_db(&self) -> Result<()> {
-        sqlx::migrate!("./migrations")
-            .run(&self.db_conn)
-            .await
-            .context("Migrating database")?;
+        self.db_conn.run_migrations().await?;
         debug!("Database initialized, rescheduling aborted jobs");
-        query!("UPDATE jobs SET is_running = 0, retries = retries + 1 WHERE is_running = 1")
-            .execute(&self.db_conn)
-            .await
-            .context("Requeuing aborted jobs")?;
+        self.db_conn.abort_jobs().await?;
         Ok(())
     }
 
@@ -162,24 +191,7 @@ impl AppQueue {
     ///
     /// Returns `false` if there are currently no jobs to run.
     async fn run_job(self: &Arc<Self>) -> Result<bool> {
-        let now = Utc::now();
-        let job_info = query!(
-            r#"
-UPDATE jobs
-    SET is_running = 1
-    WHERE id IN (
-        SELECT id FROM jobs
-        WHERE is_running = 0
-        AND run_after <= ?
-        ORDER BY priority DESC, run_after ASC
-        LIMIT 1)
-    RETURNING id, job_data, retries
-        "#,
-            now
-        )
-        .fetch_optional(&self.db_conn)
-        .await
-        .context("Loading idle queue entry from database")?;
+        let job_info = self.db_conn.acquire_job().await?;
 
         let job_info = match job_info {
             Some(job_info) => job_info,
@@ -193,9 +205,7 @@ UPDATE jobs
         match de.run(Arc::clone(self)).await {
             Ok(()) => {
                 debug!("Job {} completed successfully", job_info.id);
-                query!("DELETE FROM jobs WHERE id =?", job_info.id)
-                    .execute(&self.db_conn)
-                    .await?;
+                self.db_conn.delete_job(job_info.id).await?;
                 self.monitor_notifier.notify_one();
             }
             Err(e) => {
@@ -205,26 +215,17 @@ UPDATE jobs
                         "Job {} failed due to fatal error. Aborting retries.",
                         job_info.id
                     );
-                    query!("DELETE FROM jobs WHERE id =?", job_info.id)
-                        .execute(&self.db_conn)
-                        .await?;
+                    self.db_conn.delete_job(job_info.id).await?;
                     self.monitor_notifier.notify_one();
                     return Ok(true);
                 }
                 let next_retry = de.get_next_retry(job_info.retries);
                 debug!("Job {} failed. Retrying at {}", job_info.id, next_retry);
-                let new_retry_count = job_info.retries + 1;
                 let mut job_data = Vec::new();
                 ciborium::into_writer(&de, &mut job_data)?;
-                query!(
-                    "UPDATE jobs SET is_running = 0, run_after =?, retries =?, job_data =? WHERE id =?",
-                    next_retry,
-                    new_retry_count,
-                    job_data,
-                    job_info.id,
-                )
-                .execute(&self.db_conn)
-                .await?;
+                self.db_conn
+                    .reschedule_job(next_retry, job_data, job_info.id)
+                    .await?;
                 self.monitor_notifier.notify_one();
             }
         }
@@ -232,20 +233,9 @@ UPDATE jobs
         Ok(true)
     }
 
-    #[allow(deprecated)]
     async fn monitor_job(self: Arc<Self>) -> Result<Never> {
         loop {
-            let now = Utc::now();
-
-            let query_res = query!(
-                "SELECT id FROM jobs
-        WHERE is_running = 0
-        AND run_after <= ? LIMIT 1",
-                now
-            )
-            .fetch_optional(&self.db_conn)
-            .await?;
-            if query_res.is_some() {
+            if self.db_conn.is_task_pending().await? {
                 self.wake_up_executor_tasks();
             }
 
@@ -262,18 +252,7 @@ UPDATE jobs
     /// Uses the current task to serve as a job runner.
     ///
     /// This future will never resolve, unless an error occurs.
-    #[deprecated(
-        since = "0.1.1",
-        note = "Use `run_job_workers` or `run_job_workers_default` instead."
-    )]
-    #[allow(deprecated)]
     pub async fn run_job_loop(self: Arc<Self>) -> Result<Never> {
-        // TODO for version 0.2.0: this shouldn’t be in here!
-        if !self.monitor_spawned.swap(true, Ordering::Relaxed) {
-            let self2 = Arc::clone(&self);
-            tokio::spawn(self2.monitor_job());
-        }
-
         self.runner_notifier.notify_one();
         info!("Starting job worker.");
 
@@ -286,8 +265,11 @@ UPDATE jobs
     }
 
     /// Spawns a number of worker tasks for running jobs.
-    #[allow(deprecated)]
     pub fn run_job_workers(self: Arc<Self>, num_workers: usize) {
+        if !self.monitor_spawned.swap(true, Ordering::Relaxed) {
+            let self2 = Arc::clone(&self);
+            tokio::spawn(self2.monitor_job());
+        }
         for _ in 0..num_workers {
             tokio::spawn(Arc::clone(&self).run_job_loop());
         }
@@ -302,48 +284,11 @@ UPDATE jobs
         let job_boxed: Box<dyn Job> = Box::new(job.job);
         let mut job_data = Vec::new();
         ciborium::into_writer(&job_boxed, &mut job_data)?;
-        query!(
-            "INSERT INTO jobs (unique_job_id, run_after, job_data, priority) VALUES (?, ?, ?, ?)",
-            job.id,
-            job.run_after,
-            job_data,
-            job.priority
-        )
-        .execute(&self.db_conn)
-        .await?;
+        self.db_conn
+            .schedule_job(job.id, job.run_after, job_data, job.priority)
+            .await?;
         self.monitor_notifier.notify_one();
         Ok(())
-    }
-
-    /// Adds a job with a specific opaque ID to the queue.
-    ///
-    /// This will not do anything if the job is already in the queue.
-    pub async fn add_unique_job(&self, id: impl AsRef<str>, job: Box<dyn Job>) -> Result<()> {
-        // TODO: deduplicate with the above
-        let id = id.as_ref();
-        let mut job_data = Vec::new();
-        ciborium::into_writer(&job, &mut job_data)?;
-        let now = Utc::now();
-        query!(
-            "INSERT INTO jobs (unique_job_id, run_after, job_data) VALUES (?,?,?)",
-            id,
-            now,
-            job_data
-        )
-        .execute(&self.db_conn)
-        .await?;
-
-        self.monitor_notifier.notify_one();
-
-        Ok(())
-    }
-
-    /// Adds a job to the queue.
-    ///
-    /// unlike [`add_unique_job`], this will use a random ID.
-    pub async fn add_job(&self, job: Box<dyn Job>) -> Result<()> {
-        let id = Uuid::new_v4();
-        self.add_unique_job(id.to_string(), job).await
     }
 }
 

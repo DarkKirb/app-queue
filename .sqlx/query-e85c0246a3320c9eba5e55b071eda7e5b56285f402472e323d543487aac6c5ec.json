@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE jobs SET is_running = 0, run_after =?, retries = retries + 1, job_data =? WHERE id =?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "e85c0246a3320c9eba5e55b071eda7e5b56285f402472e323d543487aac6c5ec"
+}

@@ -1,12 +1,12 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id FROM jobs\n        WHERE is_running = 0\n        AND run_after <= ? LIMIT 1",
+  "query": "SELECT id FROM jobs WHERE is_running = 0 AND run_after <= ? LIMIT 1",
   "describe": {
     "columns": [
       {
         "name": "id",
         "ordinal": 0,
-        "type_info": "Int64"
+        "type_info": "Integer"
       }
     ],
     "parameters": {
@@ -16,5 +16,5 @@
       false
     ]
   },
-  "hash": "afc1e7dd952b7d94408d583e0c8b643746d732b59676559fd899fb59c5345bfb"
+  "hash": "7d194e67d26cf66bc4ed8fe86d5e3dd17123c4a6458eeaf4250bde54e569071a"
 }

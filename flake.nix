@@ -2,17 +2,17 @@
   description = "rust-template";
 
   inputs = {
-    nixpkgs.url = github:NixOS/nixpkgs;
-    flake-utils.url = github:numtide/flake-utils;
+    nixpkgs.url = "github:NixOS/nixpkgs";
+    flake-utils.url = "github:numtide/flake-utils";
 
     rust-overlay = {
-      url = github:oxalica/rust-overlay;
+      url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-utils.follows = "flake-utils";
     };
 
     cargo2nix = {
-      url = github:cargo2nix/cargo2nix;
+      url = "github:cargo2nix/cargo2nix";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-utils.follows = "flake-utils";
       inputs.rust-overlay.follows = "rust-overlay";
