@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::{query, query_as, PgPool};
+use tokio::sync::Mutex;
 
 use super::{AcquiredJob, Database};
 
@@ -26,6 +27,8 @@ impl Database for PgPool {
     }
 
     async fn acquire_job(&self) -> Result<Option<AcquiredJob>> {
+        static ACQUIRE_JOB_LOCK: Mutex<()> = Mutex::const_new(());
+        let _lock = ACQUIRE_JOB_LOCK.lock().await;
         let now = Utc::now();
         let job_info = query_as!(
             AcquiredJob,
