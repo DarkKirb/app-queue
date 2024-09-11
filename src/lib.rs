@@ -47,7 +47,7 @@ use std::{
     },
 };
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use db::Database;
@@ -161,7 +161,7 @@ impl AppQueue {
         }
         #[cfg(feature = "postgres")]
         if db_url.starts_with("postgresql://") {
-            return Self::new_sqlite(db_url).await;
+            return Self::new_postgres(db_url).await;
         }
         bail!("Invalid database URL: {db_url}");
     }
